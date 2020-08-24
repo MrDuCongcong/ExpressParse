@@ -84,10 +84,9 @@ class ExpressParser {
                     throw new Error(`非法字符“${this.charAt()}”`)
                 }
     
+                console.log(this.tokens);
                 // 语法树分析
                 this.analysis();
-
-                console.log(this.tokens);
                 resolve(this);
             } catch (error) {
                 console.error(error.message);
@@ -103,9 +102,10 @@ class ExpressParser {
         
         // 2、解析操作符
         let operator = this.eatBinaryOperator();
-        // 说明这个运算树只有左侧
-        if (!operator) {
+        if (typeof left !== 'undefined' && !operator) { // 说明这个运算树只有左侧
             return left;
+        } else if (typeof left === 'undefined' && operator) {
+            throw new Error(`"${operator}"运算符前应该为表达式`);
         }
         let operatorInfo = {
             procedence: this.getOperatorPrecedence(operator),  // 运算符优先级
@@ -173,8 +173,8 @@ class ExpressParser {
         } 
 
         let check = this.expr.substring(this.index);
-        const funcReg = /[A-Za-z]([A-Za-z]|\d)*\(/;
-        const varReg = /[A-Za-z]([A-Za-z]|\d)*/;
+        const funcReg = /^[A-Za-z]([A-Za-z]|\d)*\(/;
+        const varReg = /^[A-Za-z]([A-Za-z]|\d)*/;
 
         if (funcReg.test(check)) {
             // 函数
@@ -235,11 +235,12 @@ class ExpressParser {
     // 解析字符串
     eatString() {
         let str = '';
-        const quote = this.charAt(this.index++);
+        const quote = this.charAt();
         let closed = false;
         while(this.index < this.expr.length) {
-            let ch = this.charAt(this.index);
+            let ch = this.charAt(++this.index);
             if (ch === quote) {
+                this.index++ // 跳过结尾‘'’
                 closed = true;
                 break;
             } else if (ch === '\\') {
@@ -300,32 +301,39 @@ class ExpressParser {
         // 参数解析
         this.index++; // 跳过 “(”
         const params = [];
-        while (this.index < this.expr.length) {
-            this.eatSpaces();
-            const ch = this.charCodeAt(this.index);
 
-            console.log('ch', ch, this.index, this.expr.length);
-            if (ch === CLOSE_PAREN_CODE) {
-                this.index++;
-                break;
+        if (this.index < this.expr.length) {
+            while (this.index < this.expr.length) {
+                this.eatSpaces();
+    
+                const ch = this.charCodeAt(this.index);
+                if (ch === CLOSE_PAREN_CODE) {
+                    this.index++;
+                    break;
+                }
+                
+                // 解析函数内部的字段
+                const node = this.eatExpression();
+                if (node) {
+                    params.push(node);
+                }
+    
+                this.eatSpaces();
+                ch = this.charCodeAt();
+                if (ch === COMMA_CODE) {
+                    this.index++; // 跳过 ","
+                    // break;
+                } else if (ch === CLOSE_PAREN_CODE) {
+                    this.index++;
+                    break;
+                } else {
+                    throw new Error(`函数${identifier}没有闭合`);
+                }
             }
-            
-            // 解析函数内部的字段
-            const node = this.eatExpression();
-            if (node) {
-                params.push(node);
-            }
-
-            this.eatSpaces();
-            ch = this.charCodeAt();
-            if (ch === COMMA_CODE) {
-                this.index++; // 跳过 ","
-                // break;
-            } else if (ch === CLOSE_PAREN_CODE) {
-                this.index++;
-                break;
-            }
+        } else {
+            throw new Error(`函数${identifier}没有闭合`);
         }
+
 
         return {
             type: 'FUNC',
