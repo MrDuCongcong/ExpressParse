@@ -45,6 +45,12 @@ const maxBinaryOperatorLength = getMaxKeyLen(BINARY_OPERATORS);
 
 class ExpressParser {
     
+    /**
+     * 表达式解析器构造函数 
+     * @param {String} expr 必选参数 需要解析的表达式
+     * @param {Object[]} fieldList 可选参数 需要过滤的字段
+     * @param {Object[]} funcList  可选参数，函数列表
+     */
     constructor(expr, fieldList = [], funcList = []) {
         if (typeof expr !== 'string') {
             throw new Error(`[expression-parser] constructor need a string parameter, but get ${typeof expr}`);
@@ -84,12 +90,12 @@ class ExpressParser {
                     throw new Error(`非法字符“${this.charAt()}”`)
                 }
     
-                console.log(this.tokens);
+                console.log('tokens', this.tokens);
                 // 语法树分析
                 this.analysis();
+
                 resolve(this);
             } catch (error) {
-                console.error(error.message);
                 reject(error.message);
             };
         });
