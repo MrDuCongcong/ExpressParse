@@ -1,7 +1,10 @@
+import * as enumHelper from '@/utils/enumHelper';
+import computeTypeFuncs from '@/views/dataManage/utils/computeTypeFuncs';
+
 /**
  * 节点的类型：
  *  @param {String} VARIABLE 变量
- *  @param {String} FUNC 函数
+ *  @param {String} FUNCTION 函数
  *  @param {String} BINARY_EXP 二元运算符
  *  @param {String} NUMBER 数字
  *  @param {String} STRING 字符串
@@ -23,30 +26,36 @@ const LOGICAL_OPERATORS = ['||', '&&', '===', '!==', '>', '<', '>=', '<='];
 const BINARY_OPERATORS = {
     '||': 1,
     '&&': 2,
-    '===': 6, '!==': 6,
-    '>': 7, '<': 7, '<=': 7, '>=': 7,
-    '+': 9, '-': 9,
-    '*': 10, '/': 10, '%': 10,
+    '===': 6,
+    '!==': 6,
+    '>': 7,
+    '<': 7,
+    '<=': 7,
+    '>=': 7,
+    '+': 9,
+    '-': 9,
+    '*': 10,
+    '/': 10,
+    '%': 10
 };
 
 // 获取对象“键”的最大长度
-const getMaxKeyLen = function (obj) {
+const getMaxKeyLen = function(obj) {
     let max = 0;
     Object.keys(obj).forEach(key => {
-        if (key.length > max && obj.hasOwnProperty(key)) {
+        if (key.length > max && Object.prototype.hasOwnProperty.call(obj, key)) {
             max = key.length;
         }
-    })
+    });
     return max;
-}
+};
 
 const maxUnaryOperateLength = getMaxKeyLen(UNARY_operatorS);
 const maxBinaryOperatorLength = getMaxKeyLen(BINARY_OPERATORS);
 
 class ExpressParser {
-    
     /**
-     * 表达式解析器构造函数 
+     * 表达式解析器构造函数
      * @param {String} expr 必选参数 需要解析的表达式
      * @param {Object[]} fieldList 可选参数 需要过滤的字段
      * @param {Object[]} funcList  可选参数，函数列表
@@ -60,75 +69,88 @@ class ExpressParser {
         this.funcList = funcList;
     }
 
-
     parseSync() {
         this.index = 0;
-        // try {
+        try {
             this.tokens = this.eatExpression();
             if (this.index < this.expr.length) {
-                throw new Error(`非法字符“${this.charAt()}”`)
+                throw new Error(`非法字符“${this.charAt()}”`);
             }
             this.analysis();
-        // } catch (error) {
-        //     if (typeof this.onErrorCallback === 'function') {
-        //         this.onErrorCallback(error.message, this.index, this.charAt());
-        //     } else {
-        //         throw new Error(error.message);
-        //     }
-        // };
+        } catch (error) {
+            throw new Error(error.message);
+        }
 
-        return this;
+        return this.tokens;
     }
 
+    //---------------------------------表达式解析为语法树---------------------------------------
+
     parse() {
-        return new Promise(( resolve, reject ) => {
+        return new Promise((resolve, reject) => {
             this.index = 0;
             try {
                 // 表达式解析
                 this.tokens = this.eatExpression();
                 if (this.index < this.expr.length) {
-                    throw new Error(`非法字符“${this.charAt()}”`)
+                    throw new Error(`非法字符“${this.charAt()}”`);
                 }
-    
-                console.log('tokens', this.tokens);
+
                 // 语法树分析
                 this.analysis();
 
                 resolve(this);
             } catch (error) {
                 reject(error.message);
-            };
+            }
         });
     }
 
-    // 表达式解析
+    /**
+     * 表达式解析
+     * 将this.expr变量存储的表达式解析为语法树。对'方法调用'等进行递归解析。
+     * @example
+     * this.expr = " avg(count(F8) + 3) + 'teststr' ";
+     * // =>
+     * {
+     *    left: {
+     *       params: [{
+     *          type: "VARIABLE", value: "F8", raw: "F8"
+     *       }]
+     *    },
+     *    operator: "+"
+     *    right: {
+     *       type: "STRING", value: "teststr", raw: "'teststr'"
+     *    }
+     * }
+     */
     eatExpression() {
         // 1、解析左侧运算表达式
-        const left = this.eatToken();
-        
+        let left = this.eatToken();
+
         // 2、解析操作符
         let operator = this.eatBinaryOperator();
-        if (typeof left !== 'undefined' && !operator) { // 说明这个运算树只有左侧
+        if (typeof left !== 'undefined' && !operator) {
+            // 说明这个运算树只有左侧
             return left;
         } else if (typeof left === 'undefined' && operator) {
             throw new Error(`"${operator}"运算符前应该为表达式`);
         }
         let operatorInfo = {
-            procedence: this.getOperatorPrecedence(operator),  // 运算符优先级
-            value: operator,
+            procedence: this.getOperatorPrecedence(operator), // 运算符优先级
+            value: operator
         };
 
         // 3、解析右侧运算表达式
-        const right = this.eatToken();
+        let right = this.eatToken();
         if (!right) {
             throw new Error(`"${operator}"运算符后应该为表达式`);
         }
 
-
         // 创造一个运算栈
         const stack = [left, operatorInfo, right];
         // 获取下一个运算符
-        while(operator = this.eatBinaryOperator()) {
+        while ((operator = this.eatBinaryOperator())) {
             const procedence = this.getOperatorPrecedence(operator);
             if (procedence === 0) {
                 break;
@@ -136,15 +158,15 @@ class ExpressParser {
 
             operatorInfo = {
                 procedence,
-                value: operator,
+                value: operator
             };
 
-            while(stack.length > 2 && procedence < stack[stack.length - 2].procedence) {
+            while (stack.length > 2 && procedence < stack[stack.length - 2].procedence) {
                 right = stack.pop();
                 operator = stack.pop().value;
                 left = stack.pop();
                 const node = this.createNode(operator, left, right);
-                stack.push(node);    
+                stack.push(node);
             }
 
             const node = this.eatToken();
@@ -153,10 +175,10 @@ class ExpressParser {
             }
             stack.push(operatorInfo, node);
         }
-        let i  = stack.length -1;
+        let i = stack.length - 1;
         let node = stack[i];
 
-        while(i > 1) {
+        while (i > 1) {
             node = this.createNode(stack[i - 1].value, stack[i - 2], node);
             i -= 2;
         }
@@ -176,7 +198,7 @@ class ExpressParser {
         } else if (ch === OPEN_PAREN_CODE) {
             // 括号
             return this.eatGroup();
-        } 
+        }
 
         let check = this.expr.substring(this.index);
         const funcReg = /^[A-Za-z]([A-Za-z]|\d)*\(/;
@@ -192,13 +214,13 @@ class ExpressParser {
             // 检查单操作符 ！+ -
             let toCheck = this.expr.substring(this.index, this.index + maxUnaryOperateLength);
             let toCheckLength = 0;
-            while(toCheckLength = toCheck.length) {
-                if (UNARY_operatorS.hasOwnProperty(toCheck) && this.index + toCheckLength <= this.expr.length){
+            while ((toCheckLength = toCheck.length)) {
+                if (Object.prototype.hasOwnProperty.call(UNARY_operatorS, toCheck) && this.index + toCheckLength <= this.expr.length) {
                     this.index += toCheckLength;
                     return {
                         type: 'UNARY_EXP',
                         operator: toCheck,
-                        argument: this.eatToken(),
+                        argument: this.eatToken()
                     };
                 }
                 toCheck = toCheck.substr(0, --toCheckLength);
@@ -206,27 +228,26 @@ class ExpressParser {
         }
     }
 
-    
     // 解析空格
     eatSpaces() {
         let ch = this.charCodeAt();
-        while(SPACE_CODES.indexOf(ch) !== -1) {
-            ch = this.charCodeAt(++ this.index);
+        while (SPACE_CODES.indexOf(ch) !== -1) {
+            ch = this.charCodeAt(++this.index);
         }
     }
-    
+
     // 解析数字
     eatNumber() {
         let number = '';
 
         // 数字开头
-        while(this.isDigit(this.charCodeAt())) {
+        while (this.isDigit(this.charCodeAt())) {
             number += this.charAt(this.index++);
         }
 
         if (this.charCodeAt() === PERID_CODE) {
             number += this.charAt(this.index++);
-            while(this.isDigit(this.charCodeAt())) {
+            while (this.isDigit(this.charCodeAt())) {
                 number += this.charAt(this.index++);
             }
         }
@@ -234,7 +255,7 @@ class ExpressParser {
         return {
             type: 'NUMBER',
             value: parseFloat(number),
-            raw: number,
+            raw: number
         };
     }
 
@@ -243,16 +264,16 @@ class ExpressParser {
         let str = '';
         const quote = this.charAt();
         let closed = false;
-        while(this.index < this.expr.length) {
+        while (this.index < this.expr.length) {
             let ch = this.charAt(++this.index);
             if (ch === quote) {
-                this.index++ // 跳过结尾‘'’
+                this.index++; // 跳过结尾‘'’
                 closed = true;
                 break;
             } else if (ch === '\\') {
                 ch = this.charAt(this.index++);
                 // 检查所有常见的转义码
-                switch(ch) {
+                switch (ch) {
                     case 'n':
                         str += '\n';
                         break;
@@ -264,7 +285,7 @@ class ExpressParser {
                         break;
                     case 'b':
                         str += '\b';
-                        break;       
+                        break;
                     case 'f':
                         str += '\f';
                         break;
@@ -272,7 +293,7 @@ class ExpressParser {
                         str += '\x08';
                         break;
                     default:
-                        str += ch;               
+                        str += ch;
                 }
             } else {
                 str += ch;
@@ -286,15 +307,15 @@ class ExpressParser {
         return {
             type: 'STRING',
             value: str,
-            raw: quote + str + quote,
-        }
+            raw: quote + str + quote
+        };
     }
 
     // 解析函数
     eatFunc() {
         // 函数名解析
         const start = this.index;
-        while(this.index < this.expr.length) {
+        while (this.index < this.expr.length) {
             const ch = this.charCodeAt();
             if (this.isVariablePart(ch)) {
                 this.index++;
@@ -303,7 +324,7 @@ class ExpressParser {
             }
         }
         const identifier = this.expr.slice(start, this.index);
-        
+
         // 参数解析
         this.index++; // 跳过 “(”
         const params = [];
@@ -311,19 +332,19 @@ class ExpressParser {
         if (this.index < this.expr.length) {
             while (this.index < this.expr.length) {
                 this.eatSpaces();
-    
-                const ch = this.charCodeAt(this.index);
+
+                let ch = this.charCodeAt(this.index);
                 if (ch === CLOSE_PAREN_CODE) {
                     this.index++;
                     break;
                 }
-                
+
                 // 解析函数内部的字段
                 const node = this.eatExpression();
                 if (node) {
                     params.push(node);
                 }
-    
+
                 this.eatSpaces();
                 ch = this.charCodeAt();
                 if (ch === COMMA_CODE) {
@@ -340,19 +361,18 @@ class ExpressParser {
             throw new Error(`函数${identifier}没有闭合`);
         }
 
-
         return {
-            type: 'FUNC',
+            type: 'FUNCTION',
             value: identifier,
             raw: identifier,
             params: params
-        }
+        };
     }
 
     // 解析变量
     eatVariable() {
         const start = this.index;
-        while(this.index < this.expr.length) {
+        while (this.index < this.expr.length) {
             const ch = this.charCodeAt();
             if (this.isVariablePart(ch)) {
                 this.index++;
@@ -365,8 +385,8 @@ class ExpressParser {
         return {
             type: 'VARIABLE',
             value: identifier,
-            raw: identifier,
-        }
+            raw: identifier
+        };
     }
 
     // 解析圆括号
@@ -386,15 +406,15 @@ class ExpressParser {
     /**
      *  解析二元操作符
      *  @return {String} 匹配到的操作符
-    */
+     */
     eatBinaryOperator() {
         this.eatSpaces();
         // 根据“二元操作符”可能的最大长度进行截取
         let toCheck = this.expr.substring(this.index, this.index + maxBinaryOperatorLength);
         let toCheckLength = toCheck.length;
         // 将截取的字符串循环匹配
-        while(toCheckLength) {
-            if (BINARY_OPERATORS.hasOwnProperty(toCheck) && this.index + toCheckLength <= this.expr.length) {
+        while (toCheckLength) {
+            if (Object.prototype.hasOwnProperty.call(BINARY_OPERATORS, toCheck) && this.index + toCheckLength <= this.expr.length) {
                 this.index += toCheckLength;
                 return toCheck;
             }
@@ -403,24 +423,20 @@ class ExpressParser {
         return false;
     }
 
-
-    /***
-     * 下面是解析用到的工具函数
-     */
-    
+    //------------------------下面是解析用到的工具函数----------------------------------------------
     createNode(operator, left, right) {
         const type = LOGICAL_OPERATORS.indexOf(operator) !== -1 ? 'LOGICAL_EXP' : 'BINARY_EXP';
         return {
             type,
             operator,
             left,
-            right,
-        }
+            right
+        };
     }
 
     /**
      * 获取当前遍历字符
-     * @param {number} index 
+     * @param {number} index
      */
     charAt(index = this.index) {
         return this.expr.charAt(index);
@@ -428,23 +444,24 @@ class ExpressParser {
 
     /**
      * 获取当前字符的Unicode编码
-     * @param {number} index 
+     * @param {number} index
      */
     charCodeAt(index = this.index) {
         return this.expr.charCodeAt(index);
     }
 
-
     // 判断当前字符是不是数字
     isDigit(ch) {
-        return ch >= 48 && ch <= 57;  // 0...9
+        return ch >= 48 && ch <= 57; // 0...9
     }
 
     // 判断是否是变量的一部分
     isVariablePart(ch) {
-        return (ch >= 65 && ch <= 90) || // A...Z
-        (ch >= 97 && ch <= 122) || // a...z
-        (ch >= 48 && ch <= 57); // 0...9
+        return (
+            (ch >= 65 && ch <= 90) || // A...Z
+            (ch >= 97 && ch <= 122) || // a...z
+            (ch >= 48 && ch <= 57)
+        ); // 0...9
     }
 
     // 获取运算符优先级
@@ -452,52 +469,44 @@ class ExpressParser {
         return BINARY_OPERATORS[operator] || 0;
     }
 
-    onError(callback) {
-        this.onErrorCallback = callback;
-        return this;
-    }
-
+    // ------------------------和业务相关联------------------------------------------
 
     /**
-     *  下面是和我们业务相关的
-     */
-
-
-    /**
-     * 对语法树进行分析
-     * 对eatExpression()解析获得的语法树进行分析
+     * 对语法树进行业务分析，包含限定词、限定的参数等
+     * 对eatExpression()解析获得的语法树进行限定词分析
      */
     analysis() {
-       this.limitAnalysis(this.tokens);
+        if (this.fieldList.length > 0 || this.funcList.length > 0) {
+            this.limitAnalysis(this.tokens);
+        }
     }
     /**
-     * 限定分析
-     * 对语法树进行递归分析
+     * 对语法树进行递归限定分析
      * 通过对 (变量|函数) 进行限定比较，看输入的变量或者表达式是否超出我们提供的范围
      */
     limitAnalysis(obj) {
         let findItem = '';
-        switch(obj.type) {
+        switch (obj.type) {
             case 'VARIABLE':
                 // 变量
                 findItem = this.fieldList.find(i => {
                     if (obj.value === i.col) return i;
-                })
+                });
                 if (!findItem) {
                     throw new Error(`字段“${obj.value}”查找不到`);
                 }
                 break;
-            case 'FUNC':
+            case 'FUNCTION':
                 // 函数
                 findItem = this.funcList.find(i => {
                     if (obj.value === i.func) return i;
-                })
+                });
                 if (!findItem) {
                     throw new Error(`函数“${obj.value}”查找不到`);
                 }
                 obj.params.forEach(i => {
                     this.limitAnalysis(i);
-                })
+                });
                 break;
             case 'BINARY_EXP':
                 this.limitAnalysis(obj.left);
@@ -505,9 +514,113 @@ class ExpressParser {
                 break;
             default:
                 break;
-        }   
+        }
     }
-};
 
+    /**
+     * token解析好之后，根据传入的变量来计算表达式的值
+     * @param {Array} 传入的变量
+     * @return {*} 最终表达式计算好的值
+     */
+    valueOf(scope = {}) {
+        // 先进行表达式解析
+        this.parseSync();
+
+        if (this.tokens === null) {
+            return undefined;
+        }
+        const value = this.getNodeValue(this.tokens, scope);
+        return value;
+    }
+
+    /**
+     * 递归计算当前节点的值
+     * @param {*} node 当前计算的节点
+     * @param {*} scope 节点变量映射对象
+     */
+    getNodeValue(node, scope = {}) {
+        // 节点可能包含的属性
+        const { type, value, left, right, operator, params } = node;
+        if (type === 'FUNCTION') {
+            // 根据函数名称在计算函数列表中查找详细的函数信息
+            const computeType = enumHelper.findComputeTypeByName(value);
+            // 对于函数，是由前端计算或者服务端计算
+            if (computeType && computeType.use) {
+                // 根据服务端返回的计算结果， 判断变量和函数名称是否相同，返回计算值
+                const paramName = params[0].value;
+                // return value === scope[paramName].aggType ? scope[paramName].value : 0;
+                return scope[paramName].value;
+            } else if (computeType && !computeType.use) {
+                // 在前端使用的计算函数继续解析
+                const paramsValue = [];
+                params.forEach(i => {
+                    const value = this.getNodeValue(i, scope);
+                    paramsValue.push(value);
+                });
+
+                const computeFuc = computeTypeFuncs[value];
+                return computeFuc(...paramsValue);
+            }
+        } else if (type === 'VARIABLE') {
+            return scope[value].value;
+        } else if (type === 'NUMBER' || type === 'STRING') {
+            return value;
+        } else if (type === 'LOGICAL_EXP') {
+            const leftValue = this.getNodeValue(left, scope);
+            // 如果是逻辑运算的&&和||，那么可能不需要解析右边的值
+            if (operator === '&&' && !leftValue) {
+                return false;
+            }
+            if (operator === '||' && !!leftValue) {
+                return true;
+            }
+            const rightValue = this.getNodeValue(right, scope);
+            switch (node.operator) {
+                case '&&':
+                    return leftValue && rightValue;
+                case '||':
+                    return leftValue || rightValue;
+                case '>':
+                    return leftValue > rightValue;
+                case '>=':
+                    return leftValue >= rightValue;
+                case '<':
+                    return leftValue < rightValue;
+                case '<=':
+                    return leftValue <= rightValue;
+                case '===':
+                    return leftValue === rightValue;
+                case '!==':
+                    return leftValue !== rightValue;
+            }
+        } else if (type === 'BINARY_EXP') {
+            const leftValue = this.getNodeValue(left, scope);
+            const rightValue = this.getNodeValue(right, scope);
+            switch (node.operator) {
+                case '+':
+                    return leftValue + rightValue;
+                case '-':
+                    return leftValue - rightValue;
+                case '*':
+                    return leftValue * rightValue;
+                case '/':
+                    return leftValue - rightValue;
+                case '%':
+                    return leftValue % rightValue;
+                // skip default case
+            }
+        } else if (type === 'UNARY_EXP') {
+            switch (node.operator) {
+                case '!':
+                    return !this.getNodeValue(node.argument, scope);
+                case '+':
+                    return +this.getNodeValue(node.argument, scope);
+                case '-':
+                    return -this.getNodeValue(node.argument, scope);
+                // skip default case
+            }
+        }
+    }
+}
 
 export default ExpressParser;
